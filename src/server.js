@@ -1,34 +1,75 @@
 
-// src/server.js
-
+import 'dotenv/config';
 import express from 'express';
+import cors from 'cors';
 import { supabase } from './supabase.js';
-
 
 const app = express();
 
+// =====================================================
+// 1. CONFIGURAÇÕES INICIAIS
+// =====================================================
+
+// Configurar origens autorizadas
+const origensPermitidas = (
+    process.env.CORS_ORIGINS || 'http://localhost:5173'
+)
+    .split(',')
+    .map(origem => origem.trim())
+    .filter(Boolean);
+
+// Configuração do CORS
+app.use(cors({
+    origin: (origin, callback) => {
+        if (!origin || origensPermitidas.includes(origin)) {
+            return callback(null, true);
+        }
+
+        return callback(null, false);
+    },
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'x-api-key', 'Authorization'],
+    optionsSuccessStatus: 204
+}));
+
 app.use(express.json());
 
-// Verificar se a chave de acesso foi configurada
+// Verificar chave de acesso
 const apiAccessKey = process.env.API_ACCESS_KEY;
 
 if (!apiAccessKey) {
     throw new Error(
-        'API_ACCESS_KEY não configurada no arquivo .env'
+        'API_ACCESS_KEY não configurada nas variáveis de ambiente.'
     );
 }
 
-// ROTA PUBLICA PARA VERIFICAR O SERVIDOR
+
+// =====================================================
+// 2. ROTAS PÚBLICAS
+// =====================================================
+
+// Verificar funcionamento do servidor
 app.get('/health', (req, res) => {
-    res.status(200).json({
+    return res.status(200).json({
         status: 'healthy',
         mensagem: 'Servidor funcionando.'
     });
 });
 
-// PROTEGER TODAS AS ROTAS DA API
-app.use('/api', (req, res, next) => {
+// Rota inicial
+app.get('/', (req, res) => {
+    return res.status(200).json({
+        status: 'online',
+        mensagem: 'API da Matriz Integrada funcionando!'
+    });
+});
 
+
+// =====================================================
+// 3. AUTENTICAÇÃO DAS ROTAS DA API
+// =====================================================
+
+app.use('/api', (req, res, next) => {
     const chaveRecebida = req.get('x-api-key');
 
     if (!chaveRecebida || chaveRecebida !== apiAccessKey) {
@@ -42,15 +83,10 @@ app.use('/api', (req, res, next) => {
 });
 
 
-// ROTA INICIAL
-app.get('/', (req, res) => {
-    res.json({
-        status: 'online',
-        mensagem: 'API da Matriz Integrada funcionando!'
-    });
-});
+// =====================================================
+// 4. TESTAR CONEXÃO COM O SUPABASE
+// =====================================================
 
-// TESTAR CONEXAO COM O SUPABASE
 app.get('/api/teste-conexao', async (req, res) => {
     try {
         const { data, error } = await supabase
@@ -86,13 +122,15 @@ app.get('/api/teste-conexao', async (req, res) => {
 });
 
 
-// ROTA: LISTAR ELEMENTOS
+// =====================================================
+// 5. LISTAR ELEMENTOS
+// =====================================================
+
 app.get('/api/elementos', async (req, res) => {
     try {
         const pagina = Number(req.query.pagina ?? 1);
         const limite = Number(req.query.limite ?? 20);
 
-        // Validar paginação
         if (
             !Number.isInteger(pagina) ||
             pagina < 1 ||
@@ -109,7 +147,6 @@ app.get('/api/elementos', async (req, res) => {
         const inicio = (pagina - 1) * limite;
         const fim = inicio + limite - 1;
 
-        // Consultar elementos
         let consulta = supabase
             .from('elemento')
             .select('id, tipo, nome, descricao, estado', {
@@ -117,7 +154,6 @@ app.get('/api/elementos', async (req, res) => {
             })
             .order('id', { ascending: true });
 
-        // Aplicar filtros opcionais
         const tipo = req.query.tipo?.toString().trim();
         const estado = req.query.estado?.toString().trim();
 
@@ -152,7 +188,7 @@ app.get('/api/elementos', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Erro interno:', error);
+        console.error('Erro ao listar elementos:', error);
 
         return res.status(500).json({
             status: 'erro',
@@ -161,13 +197,64 @@ app.get('/api/elementos', async (req, res) => {
     }
 });
 
-// ROTA: LISTAR TODOS OS RELACIONAMENTOS
+
+// =====================================================
+// 6. CONSULTAR ELEMENTO PELO ID
+// =====================================================
+
+app.get('/api/elementos/:id', async (req, res) => {
+    try {
+        const id = req.params.id.trim();
+
+        const { data, error } = await supabase
+            .from('elemento')
+            .select('id, tipo, nome, descricao, estado')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (error) {
+            console.error('Erro ao consultar elemento:', error.message);
+
+            return res.status(500).json({
+                status: 'erro',
+                mensagem: 'Não foi possível consultar o elemento.'
+            });
+        }
+
+        if (!data) {
+            return res.status(404).json({
+                status: 'nao_encontrado',
+                mensagem: 'Elemento não encontrado no catálogo.',
+                idPesquisado: id
+            });
+        }
+
+        return res.status(200).json({
+            status: 'sucesso',
+            mensagem: 'Elemento encontrado.',
+            elemento: data
+        });
+
+    } catch (error) {
+        console.error('Erro ao consultar elemento:', error);
+
+        return res.status(500).json({
+            status: 'erro',
+            mensagem: 'Erro interno do servidor.'
+        });
+    }
+});
+
+
+// =====================================================
+// 7. LISTAR TODOS OS RELACIONAMENTOS
+// =====================================================
+
 app.get('/api/relacoes', async (req, res) => {
     try {
         const pagina = Number(req.query.pagina ?? 1);
         const limite = Number(req.query.limite ?? 20);
 
-        // Validar paginação
         if (
             !Number.isInteger(pagina) ||
             pagina < 1 ||
@@ -184,7 +271,6 @@ app.get('/api/relacoes', async (req, res) => {
         const inicio = (pagina - 1) * limite;
         const fim = inicio + limite - 1;
 
-        // Preparar consulta
         let consulta = supabase
             .from('relacao')
             .select(
@@ -193,7 +279,6 @@ app.get('/api/relacoes', async (req, res) => {
             )
             .order('id', { ascending: true });
 
-        // Aplicar filtros opcionais
         const tipoRelacao = req.query.tipo_relacao?.toString().trim();
         const estado = req.query.estado?.toString().trim();
         const origemId = req.query.origem_id?.toString().trim();
@@ -215,7 +300,6 @@ app.get('/api/relacoes', async (req, res) => {
             consulta = consulta.eq('destino_id', destinoId);
         }
 
-        // Executar consulta paginada
         const { data, error, count } = await consulta.range(inicio, fim);
 
         if (error) {
@@ -229,7 +313,6 @@ app.get('/api/relacoes', async (req, res) => {
 
         const relacoes = data ?? [];
 
-        // Quando não houver relacionamentos
         if (relacoes.length === 0) {
             return res.status(200).json({
                 status: 'sucesso',
@@ -243,7 +326,6 @@ app.get('/api/relacoes', async (req, res) => {
             });
         }
 
-        // Identificar os elementos envolvidos
         const idsRelacionados = [
             ...new Set(
                 relacoes.flatMap(relacao => [
@@ -253,7 +335,6 @@ app.get('/api/relacoes', async (req, res) => {
             )
         ];
 
-        // Consultar os elementos
         const { data: elementos, error: erroElementos } = await supabase
             .from('elemento')
             .select('id, tipo, nome, descricao, estado')
@@ -271,12 +352,10 @@ app.get('/api/relacoes', async (req, res) => {
             });
         }
 
-        // Criar mapa para relacionar os elementos
         const mapaElementos = new Map(
-            elementos.map(elemento => [elemento.id, elemento])
+            (elementos ?? []).map(elemento => [elemento.id, elemento])
         );
 
-        // Organizar os relacionamentos
         const resultado = relacoes.map(relacao => ({
             id: relacao.id,
             tipo_relacao: relacao.tipo_relacao,
@@ -297,7 +376,7 @@ app.get('/api/relacoes', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Erro interno:', error);
+        console.error('Erro ao listar relacionamentos:', error);
 
         return res.status(500).json({
             status: 'erro',
@@ -307,7 +386,133 @@ app.get('/api/relacoes', async (req, res) => {
 });
 
 
-// ROTA: LISTAR EVIDÊNCIAS
+// =====================================================
+// 8. CONSULTAR RELACIONAMENTOS DE UM ELEMENTO
+// =====================================================
+
+app.get('/api/elementos/:id/relacoes', async (req, res) => {
+    try {
+        const id = req.params.id.trim();
+
+        const { data: elemento, error: erroElemento } = await supabase
+            .from('elemento')
+            .select('id, tipo, nome, descricao, estado')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (erroElemento) {
+            console.error(erroElemento.message);
+
+            return res.status(500).json({
+                status: 'erro',
+                mensagem: 'Erro ao consultar elemento.'
+            });
+        }
+
+        if (!elemento) {
+            return res.status(404).json({
+                status: 'nao_encontrado',
+                mensagem: 'Elemento não encontrado no catálogo.',
+                idPesquisado: id
+            });
+        }
+
+        const [origemResult, destinoResult] = await Promise.all([
+            supabase
+                .from('relacao')
+                .select('id, origem_id, destino_id, tipo_relacao, estado')
+                .eq('origem_id', id),
+
+            supabase
+                .from('relacao')
+                .select('id, origem_id, destino_id, tipo_relacao, estado')
+                .eq('destino_id', id)
+        ]);
+
+        if (origemResult.error || destinoResult.error) {
+            console.error(
+                origemResult.error?.message ||
+                destinoResult.error?.message
+            );
+
+            return res.status(500).json({
+                status: 'erro',
+                mensagem: 'Erro ao consultar relacionamentos.'
+            });
+        }
+
+        const relacoes = [
+            ...(origemResult.data ?? []),
+            ...(destinoResult.data ?? [])
+        ];
+
+        if (relacoes.length === 0) {
+            return res.status(200).json({
+                status: 'sucesso',
+                elemento,
+                totalRelacoes: 0,
+                relacoes: []
+            });
+        }
+
+        const idsRelacionados = [
+            ...new Set(
+                relacoes.flatMap(relacao => [
+                    relacao.origem_id,
+                    relacao.destino_id
+                ])
+            )
+        ];
+
+        const { data: elementos, error: erroRelacionados } =
+            await supabase
+                .from('elemento')
+                .select('id, tipo, nome')
+                .in('id', idsRelacionados);
+
+        if (erroRelacionados) {
+            console.error(erroRelacionados.message);
+
+            return res.status(500).json({
+                status: 'erro',
+                mensagem: 'Erro ao consultar elementos relacionados.'
+            });
+        }
+
+        const mapaElementos = new Map(
+            (elementos ?? []).map(item => [item.id, item])
+        );
+
+        const resultado = relacoes.map(relacao => ({
+            id: relacao.id,
+            tipo_relacao: relacao.tipo_relacao,
+            estado: relacao.estado,
+            origem: mapaElementos.get(relacao.origem_id) ?? null,
+            destino: mapaElementos.get(relacao.destino_id) ?? null
+        }));
+
+        return res.status(200).json({
+            status: 'sucesso',
+            elemento,
+            totalRelacoes: resultado.length,
+            relacoes: resultado
+        });
+
+    } catch (error) {
+        console.error('Erro ao consultar relacionamentos:', error);
+
+        return res.status(500).json({
+            status: 'erro',
+            mensagem: 'Erro interno do servidor.'
+        });
+    }
+});
+
+
+// =====================================================
+// 9. LISTAR EVIDÊNCIAS
+// =====================================================
+
 app.get('/api/evidencias', async (req, res) => {
     try {
         const pagina = Number(req.query.pagina ?? 1);
@@ -319,7 +524,6 @@ app.get('/api/evidencias', async (req, res) => {
         const dataInicio = req.query.data_inicio?.toString().trim();
         const dataFim = req.query.data_fim?.toString().trim();
 
-        // Validar paginação
         if (
             !Number.isInteger(pagina) ||
             pagina < 1 ||
@@ -333,7 +537,6 @@ app.get('/api/evidencias', async (req, res) => {
             });
         }
 
-        // Validar datas no formato YYYY-MM-DD
         const dataValida = valor => {
             if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) {
                 return false;
@@ -367,7 +570,6 @@ app.get('/api/evidencias', async (req, res) => {
         const inicio = (pagina - 1) * limite;
         const fim = inicio + limite - 1;
 
-        // Preparar consulta de evidências
         let consulta = supabase
             .from('evidencia')
             .select(
@@ -377,7 +579,6 @@ app.get('/api/evidencias', async (req, res) => {
             .order('data_coleta', { ascending: false })
             .order('id', { ascending: true });
 
-        // Aplicar filtros opcionais
         if (fonte) {
             consulta = consulta.eq('fonte', fonte);
         }
@@ -398,7 +599,6 @@ app.get('/api/evidencias', async (req, res) => {
             consulta = consulta.lte('data_coleta', dataFim);
         }
 
-        // Executar consulta paginada
         const { data, error, count } = await consulta.range(inicio, fim);
 
         if (error) {
@@ -412,7 +612,6 @@ app.get('/api/evidencias', async (req, res) => {
 
         const evidencias = data ?? [];
 
-        // Retornar lista vazia quando não houver resultados
         if (evidencias.length === 0) {
             return res.status(200).json({
                 status: 'sucesso',
@@ -426,7 +625,6 @@ app.get('/api/evidencias', async (req, res) => {
             });
         }
 
-        // Identificar relacionamentos associados
         const idsRelacoes = [
             ...new Set(
                 evidencias
@@ -459,7 +657,6 @@ app.get('/api/evidencias', async (req, res) => {
             relacoes = dadosRelacoes ?? [];
         }
 
-        // Identificar todos os elementos associados
         const idsElementos = [
             ...new Set([
                 ...evidencias
@@ -497,7 +694,6 @@ app.get('/api/evidencias', async (req, res) => {
             elementos = dadosElementos ?? [];
         }
 
-        // Criar mapas de consulta rápida
         const mapaElementos = new Map(
             elementos.map(elemento => [elemento.id, elemento])
         );
@@ -506,7 +702,6 @@ app.get('/api/evidencias', async (req, res) => {
             relacoes.map(relacao => [relacao.id, relacao])
         );
 
-        // Organizar as evidências com seus vínculos
         const resultado = evidencias.map(evidencia => {
             const relacao = mapaRelacoes.get(evidencia.relacao_id);
 
@@ -539,7 +734,7 @@ app.get('/api/evidencias', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Erro interno:', error);
+        console.error('Erro ao listar evidências:', error);
 
         return res.status(500).json({
             status: 'erro',
@@ -548,10 +743,13 @@ app.get('/api/evidencias', async (req, res) => {
     }
 });
 
-/* ROTA: INDICADORES GERAIS DA MATRIZ */
+
+// =====================================================
+// 10. INDICADORES GERAIS DA MATRIZ
+// =====================================================
+
 app.get('/api/indicadores', async (req, res) => {
     try {
-        // Função para contar registros no Supabase
         const contarRegistros = async (tabela, estado = null) => {
             let consulta = supabase
                 .from(tabela)
@@ -580,7 +778,6 @@ app.get('/api/indicadores', async (req, res) => {
             'DESATUALIZADO'
         ];
 
-        // Executar as contagens em paralelo
         const resultados = await Promise.all([
             contarRegistros('elemento'),
             contarRegistros('relacao'),
@@ -602,7 +799,6 @@ app.get('/api/indicadores', async (req, res) => {
             ...contagens
         ] = resultados;
 
-        // Organizar contagens por estado
         const elementosPorEstado = {};
         const relacionamentosPorEstado = {};
 
@@ -636,184 +832,15 @@ app.get('/api/indicadores', async (req, res) => {
     }
 });
 
-// ROTA 1: CONSULTAR ELEMENTO PELO ID
-app.get('/api/elementos/:id', async (req, res) => {
-    try {
-        const id = req.params.id.trim();
 
-        const { data, error } = await supabase
-            .from('elemento')
-            .select('id, tipo, nome, descricao, estado')
-            .eq('id', id)
-            .maybeSingle();
+// =====================================================
+// 11. PESQUISAR IMPACTOS DIRETOS E INDIRETOS
+// =====================================================
 
-        if (error) {
-            console.error('Erro ao consultar elemento:', error.message);
-
-            return res.status(500).json({
-                status: 'erro',
-                mensagem: 'Não foi possível consultar o elemento.'
-            });
-        }
-
-        if (!data) {
-            return res.status(404).json({
-                status: 'nao_encontrado',
-                mensagem: 'Elemento não encontrado no catálogo.',
-                idPesquisado: id
-            });
-        }
-
-        return res.status(200).json({
-            status: 'sucesso',
-            mensagem: 'Elemento encontrado.',
-            elemento: data
-        });
-
-    } catch (error) {
-        console.error('Erro interno:', error);
-
-        return res.status(500).json({
-            status: 'erro',
-            mensagem: 'Erro interno do servidor.'
-        });
-    }
-});
-
-
-// ROTA 2: CONSULTAR RELACIONAMENTOS DE UM ELEMENTO
-app.get('/api/elementos/:id/relacoes', async (req, res) => {
-    try {
-        const id = req.params.id.trim();
-
-        // Verificar se o elemento existe
-        const { data: elemento, error: erroElemento } = await supabase
-            .from('elemento')
-            .select('id, tipo, nome, descricao, estado')
-            .eq('id', id)
-            .maybeSingle();
-
-        if (erroElemento) {
-            console.error(erroElemento.message);
-
-            return res.status(500).json({
-                status: 'erro',
-                mensagem: 'Erro ao consultar elemento.'
-            });
-        }
-
-        if (!elemento) {
-            return res.status(404).json({
-                status: 'nao_encontrado',
-                mensagem: 'Elemento não encontrado no catálogo.',
-                idPesquisado: id
-            });
-        }
-
-        // Buscar relações em que o elemento é a origem
-        // e relações em que é o destino
-        const [origemResult, destinoResult] = await Promise.all([
-            supabase
-                .from('relacao')
-                .select('id, origem_id, destino_id, tipo_relacao, estado')
-                .eq('origem_id', id),
-
-            supabase
-                .from('relacao')
-                .select('id, origem_id, destino_id, tipo_relacao, estado')
-                .eq('destino_id', id)
-        ]);
-
-        if (origemResult.error || destinoResult.error) {
-            console.error(
-                origemResult.error?.message ||
-                destinoResult.error?.message
-            );
-
-            return res.status(500).json({
-                status: 'erro',
-                mensagem: 'Erro ao consultar relacionamentos.'
-            });
-        }
-
-        const relacoes = [
-            ...origemResult.data,
-            ...destinoResult.data
-        ];
-
-        // Se não existirem relações, retornar lista vazia
-        if (relacoes.length === 0) {
-            return res.status(200).json({
-                status: 'sucesso',
-                elemento,
-                totalRelacoes: 0,
-                relacoes: []
-            });
-        }
-
-        // Identificar todos os elementos relacionados
-        const idsRelacionados = [
-            ...new Set(
-                relacoes.flatMap(relacao => [
-                    relacao.origem_id,
-                    relacao.destino_id
-                ])
-            )
-        ];
-
-        // Buscar os dados dos elementos relacionados
-        const { data: elementos, error: erroRelacionados } =
-            await supabase
-                .from('elemento')
-                .select('id, tipo, nome')
-                .in('id', idsRelacionados);
-
-        if (erroRelacionados) {
-            console.error(erroRelacionados.message);
-
-            return res.status(500).json({
-                status: 'erro',
-                mensagem: 'Erro ao consultar elementos relacionados.'
-            });
-        }
-
-        const mapaElementos = new Map(
-            elementos.map(item => [item.id, item])
-        );
-
-        // Organizar a resposta
-        const resultado = relacoes.map(relacao => ({
-            id: relacao.id,
-            tipo_relacao: relacao.tipo_relacao,
-            estado: relacao.estado,
-            origem: mapaElementos.get(relacao.origem_id),
-            destino: mapaElementos.get(relacao.destino_id)
-        }));
-
-        return res.status(200).json({
-            status: 'sucesso',
-            elemento,
-            totalRelacoes: resultado.length,
-            relacoes: resultado
-        });
-
-    } catch (error) {
-        console.error('Erro interno:', error);
-
-        return res.status(500).json({
-            status: 'erro',
-            mensagem: 'Erro interno do servidor.'
-        });
-    }
-});
-
-
-// ROTA 3: PESQUISAR IMPACTOS DIRETOS E INDIRETOS
 app.get('/api/elementos/:id/impactos', async (req, res) => {
     try {
         const id = req.params.id.trim();
 
-        // Definir a profundidade máxima da pesquisa
         const profundidade = Number(req.query.profundidade ?? 5);
 
         if (
@@ -827,7 +854,6 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
             });
         }
 
-        // Verificar se foi solicitado um filtro de estado
         const estado = req.query.estado
             ? String(req.query.estado).trim().toUpperCase()
             : null;
@@ -846,7 +872,6 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
             });
         }
 
-        // Verificar se o elemento pesquisado existe
         const { data: elemento, error: erroElemento } = await supabase
             .from('elemento')
             .select('id, tipo, nome, descricao, estado')
@@ -870,13 +895,11 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
             });
         }
 
-        // Controle da pesquisa em cadeia
         let fronteira = [id];
 
         const visitados = new Set([id]);
         const impactos = new Map();
 
-        // Percorrer os relacionamentos até a profundidade definida
         for (
             let nivel = 1;
             nivel <= profundidade && fronteira.length > 0;
@@ -887,7 +910,6 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
                 .select('id, origem_id, destino_id, tipo_relacao, estado')
                 .in('destino_id', fronteira);
 
-            // Aplicar filtro de estado, caso solicitado
             if (estado) {
                 consulta = consulta.eq('estado', estado);
             }
@@ -909,12 +931,10 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
             for (const relacao of relacoesNivel ?? []) {
                 const origemId = relacao.origem_id;
 
-                // Evitar retornar o próprio elemento pesquisado
                 if (origemId === id) {
                     continue;
                 }
 
-                // Registrar o elemento impactado
                 if (!impactos.has(origemId)) {
                     impactos.set(origemId, {
                         id: origemId,
@@ -925,7 +945,6 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
 
                 const impacto = impactos.get(origemId);
 
-                // Evitar repetir a mesma relação
                 if (!impacto.relacoes.some(r => r.id === relacao.id)) {
                     impacto.relacoes.push({
                         id: relacao.id,
@@ -934,7 +953,6 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
                     });
                 }
 
-                // Preparar o próximo nível da pesquisa
                 if (!visitados.has(origemId)) {
                     visitados.add(origemId);
                     proximaFronteira.push(origemId);
@@ -944,7 +962,6 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
             fronteira = proximaFronteira;
         }
 
-        // Se nenhum impacto for encontrado
         if (impactos.size === 0) {
             return res.status(200).json({
                 status: 'sucesso',
@@ -958,7 +975,6 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
             });
         }
 
-        // Coletar IDs dos elementos e relacionamentos encontrados
         const idsImpactados = [...impactos.keys()];
 
         const idsRelacoes = [
@@ -969,7 +985,6 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
             )
         ];
 
-        // Buscar elementos e evidências em paralelo
         const [elementosResult, evidenciasResult] = await Promise.all([
             supabase
                 .from('elemento')
@@ -994,12 +1009,10 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
             });
         }
 
-        // Organizar os elementos por ID
         const mapaElementos = new Map(
             (elementosResult.data ?? []).map(e => [e.id, e])
         );
 
-        // Organizar as evidências por relacionamento
         const mapaEvidencias = new Map();
 
         for (const evidencia of evidenciasResult.data ?? []) {
@@ -1016,7 +1029,6 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
             });
         }
 
-        // Montar os resultados finais
         const resultado = [...impactos.values()]
             .map(impacto => {
                 const elementoImpactado = mapaElementos.get(impacto.id);
@@ -1058,7 +1070,7 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Erro interno:', error);
+        console.error('Erro ao pesquisar impactos:', error);
 
         return res.status(500).json({
             status: 'erro',
@@ -1068,12 +1080,14 @@ app.get('/api/elementos/:id/impactos', async (req, res) => {
 });
 
 
-// ROTA 4: PESQUISAR ELEMENTOS POR NOME OU DESCRICAO
+// =====================================================
+// 12. PESQUISAR ELEMENTOS POR NOME OU DESCRIÇÃO
+// =====================================================
+
 app.get('/api/busca', async (req, res) => {
     try {
         const termo = req.query.q;
 
-        // Validar o termo de pesquisa
         if (typeof termo !== 'string' || !termo.trim()) {
             return res.status(400).json({
                 status: 'erro',
@@ -1090,7 +1104,6 @@ app.get('/api/busca', async (req, res) => {
             });
         }
 
-        // Pesquisar simultaneamente no nome e na descrição
         const [nomeResult, descricaoResult] = await Promise.all([
             supabase
                 .from('elemento')
@@ -1117,7 +1130,6 @@ app.get('/api/busca', async (req, res) => {
             });
         }
 
-        // Unir os resultados e evitar elementos duplicados
         const elementosUnidos = [
             ...(nomeResult.data ?? []),
             ...(descricaoResult.data ?? [])
@@ -1143,7 +1155,7 @@ app.get('/api/busca', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Erro interno:', error);
+        console.error('Erro na pesquisa:', error);
 
         return res.status(500).json({
             status: 'erro',
@@ -1153,12 +1165,51 @@ app.get('/api/busca', async (req, res) => {
 });
 
 
-// INICIAR SERVIDOR
+// =====================================================
+// 13. ROTA PARA ENDEREÇOS NÃO ENCONTRADOS
+// =====================================================
+
+app.use((req, res) => {
+    return res.status(404).json({
+        status: 'nao_encontrado',
+        mensagem: 'Rota não encontrada.',
+        caminho: req.originalUrl
+    });
+});
+
+
+// =====================================================
+// 14. TRATAMENTO DE ERROS
+// =====================================================
+
+app.use((error, req, res, next) => {
+    console.error('Erro não tratado:', error);
+
+    if (res.headersSent) {
+        return next(error);
+    }
+
+    return res.status(500).json({
+        status: 'erro',
+        mensagem: 'Erro interno do servidor.'
+    });
+});
+
+
+// =====================================================
+// 15. INICIALIZAÇÃO DO SERVIDOR
+// =====================================================
+
 const PORT = Number(process.env.PORT) || 3000;
 
-app.listen(PORT, () => {
+const servidor = app.listen(PORT, '0.0.0.0', () => {
     console.log('=================================');
     console.log(' API MATRIZ INTEGRADA');
     console.log(` Servidor: http://localhost:${PORT}`);
     console.log('=================================');
+});
+
+servidor.on('error', error => {
+    console.error('Erro ao iniciar o servidor:', error);
+    process.exit(1);
 });
