@@ -86,6 +86,556 @@ app.get('/api/teste-conexao', async (req, res) => {
 });
 
 
+// ROTA: LISTAR ELEMENTOS
+app.get('/api/elementos', async (req, res) => {
+    try {
+        const pagina = Number(req.query.pagina ?? 1);
+        const limite = Number(req.query.limite ?? 20);
+
+        // Validar paginação
+        if (
+            !Number.isInteger(pagina) ||
+            pagina < 1 ||
+            !Number.isInteger(limite) ||
+            limite < 1 ||
+            limite > 100
+        ) {
+            return res.status(400).json({
+                status: 'erro',
+                mensagem: 'Informe uma página válida e um limite entre 1 e 100.'
+            });
+        }
+
+        const inicio = (pagina - 1) * limite;
+        const fim = inicio + limite - 1;
+
+        // Consultar elementos
+        let consulta = supabase
+            .from('elemento')
+            .select('id, tipo, nome, descricao, estado', {
+                count: 'exact'
+            })
+            .order('id', { ascending: true });
+
+        // Aplicar filtros opcionais
+        const tipo = req.query.tipo?.toString().trim();
+        const estado = req.query.estado?.toString().trim();
+
+        if (tipo) {
+            consulta = consulta.eq('tipo', tipo);
+        }
+
+        if (estado) {
+            consulta = consulta.eq('estado', estado);
+        }
+
+        const { data, error, count } = await consulta.range(inicio, fim);
+
+        if (error) {
+            console.error('Erro ao listar elementos:', error.message);
+
+            return res.status(500).json({
+                status: 'erro',
+                mensagem: 'Não foi possível listar os elementos.'
+            });
+        }
+
+        return res.status(200).json({
+            status: 'sucesso',
+            mensagem: 'Elementos consultados com sucesso.',
+            pagina,
+            limite,
+            total: count ?? 0,
+            totalPaginas: Math.ceil((count ?? 0) / limite),
+            quantidade: data?.length ?? 0,
+            elementos: data ?? []
+        });
+
+    } catch (error) {
+        console.error('Erro interno:', error);
+
+        return res.status(500).json({
+            status: 'erro',
+            mensagem: 'Erro interno do servidor.'
+        });
+    }
+});
+
+// ROTA: LISTAR TODOS OS RELACIONAMENTOS
+app.get('/api/relacoes', async (req, res) => {
+    try {
+        const pagina = Number(req.query.pagina ?? 1);
+        const limite = Number(req.query.limite ?? 20);
+
+        // Validar paginação
+        if (
+            !Number.isInteger(pagina) ||
+            pagina < 1 ||
+            !Number.isInteger(limite) ||
+            limite < 1 ||
+            limite > 100
+        ) {
+            return res.status(400).json({
+                status: 'erro',
+                mensagem: 'Informe uma página válida e um limite entre 1 e 100.'
+            });
+        }
+
+        const inicio = (pagina - 1) * limite;
+        const fim = inicio + limite - 1;
+
+        // Preparar consulta
+        let consulta = supabase
+            .from('relacao')
+            .select(
+                'id, origem_id, destino_id, tipo_relacao, estado',
+                { count: 'exact' }
+            )
+            .order('id', { ascending: true });
+
+        // Aplicar filtros opcionais
+        const tipoRelacao = req.query.tipo_relacao?.toString().trim();
+        const estado = req.query.estado?.toString().trim();
+        const origemId = req.query.origem_id?.toString().trim();
+        const destinoId = req.query.destino_id?.toString().trim();
+
+        if (tipoRelacao) {
+            consulta = consulta.eq('tipo_relacao', tipoRelacao);
+        }
+
+        if (estado) {
+            consulta = consulta.eq('estado', estado);
+        }
+
+        if (origemId) {
+            consulta = consulta.eq('origem_id', origemId);
+        }
+
+        if (destinoId) {
+            consulta = consulta.eq('destino_id', destinoId);
+        }
+
+        // Executar consulta paginada
+        const { data, error, count } = await consulta.range(inicio, fim);
+
+        if (error) {
+            console.error('Erro ao listar relacionamentos:', error.message);
+
+            return res.status(500).json({
+                status: 'erro',
+                mensagem: 'Não foi possível listar os relacionamentos.'
+            });
+        }
+
+        const relacoes = data ?? [];
+
+        // Quando não houver relacionamentos
+        if (relacoes.length === 0) {
+            return res.status(200).json({
+                status: 'sucesso',
+                mensagem: 'Relacionamentos consultados com sucesso.',
+                pagina,
+                limite,
+                total: count ?? 0,
+                totalPaginas: Math.ceil((count ?? 0) / limite),
+                quantidade: 0,
+                relacoes: []
+            });
+        }
+
+        // Identificar os elementos envolvidos
+        const idsRelacionados = [
+            ...new Set(
+                relacoes.flatMap(relacao => [
+                    relacao.origem_id,
+                    relacao.destino_id
+                ])
+            )
+        ];
+
+        // Consultar os elementos
+        const { data: elementos, error: erroElementos } = await supabase
+            .from('elemento')
+            .select('id, tipo, nome, descricao, estado')
+            .in('id', idsRelacionados);
+
+        if (erroElementos) {
+            console.error(
+                'Erro ao consultar elementos relacionados:',
+                erroElementos.message
+            );
+
+            return res.status(500).json({
+                status: 'erro',
+                mensagem: 'Não foi possível consultar os elementos relacionados.'
+            });
+        }
+
+        // Criar mapa para relacionar os elementos
+        const mapaElementos = new Map(
+            elementos.map(elemento => [elemento.id, elemento])
+        );
+
+        // Organizar os relacionamentos
+        const resultado = relacoes.map(relacao => ({
+            id: relacao.id,
+            tipo_relacao: relacao.tipo_relacao,
+            estado: relacao.estado,
+            origem: mapaElementos.get(relacao.origem_id) ?? null,
+            destino: mapaElementos.get(relacao.destino_id) ?? null
+        }));
+
+        return res.status(200).json({
+            status: 'sucesso',
+            mensagem: 'Relacionamentos consultados com sucesso.',
+            pagina,
+            limite,
+            total: count ?? 0,
+            totalPaginas: Math.ceil((count ?? 0) / limite),
+            quantidade: resultado.length,
+            relacoes: resultado
+        });
+
+    } catch (error) {
+        console.error('Erro interno:', error);
+
+        return res.status(500).json({
+            status: 'erro',
+            mensagem: 'Erro interno do servidor.'
+        });
+    }
+});
+
+
+// ROTA: LISTAR EVIDÊNCIAS
+app.get('/api/evidencias', async (req, res) => {
+    try {
+        const pagina = Number(req.query.pagina ?? 1);
+        const limite = Number(req.query.limite ?? 20);
+
+        const fonte = req.query.fonte?.toString().trim();
+        const elementoId = req.query.elemento_id?.toString().trim();
+        const relacaoId = req.query.relacao_id?.toString().trim();
+        const dataInicio = req.query.data_inicio?.toString().trim();
+        const dataFim = req.query.data_fim?.toString().trim();
+
+        // Validar paginação
+        if (
+            !Number.isInteger(pagina) ||
+            pagina < 1 ||
+            !Number.isInteger(limite) ||
+            limite < 1 ||
+            limite > 100
+        ) {
+            return res.status(400).json({
+                status: 'erro',
+                mensagem: 'Informe uma página válida e um limite entre 1 e 100.'
+            });
+        }
+
+        // Validar datas no formato YYYY-MM-DD
+        const dataValida = valor => {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) {
+                return false;
+            }
+
+            const data = new Date(`${valor}T00:00:00.000Z`);
+
+            return (
+                !Number.isNaN(data.getTime()) &&
+                data.toISOString().slice(0, 10) === valor
+            );
+        };
+
+        if (
+            (dataInicio && !dataValida(dataInicio)) ||
+            (dataFim && !dataValida(dataFim))
+        ) {
+            return res.status(400).json({
+                status: 'erro',
+                mensagem: 'Informe datas válidas no formato YYYY-MM-DD.'
+            });
+        }
+
+        if (dataInicio && dataFim && dataInicio > dataFim) {
+            return res.status(400).json({
+                status: 'erro',
+                mensagem: 'A data inicial não pode ser posterior à data final.'
+            });
+        }
+
+        const inicio = (pagina - 1) * limite;
+        const fim = inicio + limite - 1;
+
+        // Preparar consulta de evidências
+        let consulta = supabase
+            .from('evidencia')
+            .select(
+                'id, fonte, referencia, data_coleta, responsavel_revisao, elemento_id, relacao_id',
+                { count: 'exact' }
+            )
+            .order('data_coleta', { ascending: false })
+            .order('id', { ascending: true });
+
+        // Aplicar filtros opcionais
+        if (fonte) {
+            consulta = consulta.eq('fonte', fonte);
+        }
+
+        if (elementoId) {
+            consulta = consulta.eq('elemento_id', elementoId);
+        }
+
+        if (relacaoId) {
+            consulta = consulta.eq('relacao_id', relacaoId);
+        }
+
+        if (dataInicio) {
+            consulta = consulta.gte('data_coleta', dataInicio);
+        }
+
+        if (dataFim) {
+            consulta = consulta.lte('data_coleta', dataFim);
+        }
+
+        // Executar consulta paginada
+        const { data, error, count } = await consulta.range(inicio, fim);
+
+        if (error) {
+            console.error('Erro ao listar evidências:', error.message);
+
+            return res.status(500).json({
+                status: 'erro',
+                mensagem: 'Não foi possível listar as evidências.'
+            });
+        }
+
+        const evidencias = data ?? [];
+
+        // Retornar lista vazia quando não houver resultados
+        if (evidencias.length === 0) {
+            return res.status(200).json({
+                status: 'sucesso',
+                mensagem: 'Evidências consultadas com sucesso.',
+                pagina,
+                limite,
+                total: count ?? 0,
+                totalPaginas: Math.ceil((count ?? 0) / limite),
+                quantidade: 0,
+                evidencias: []
+            });
+        }
+
+        // Identificar relacionamentos associados
+        const idsRelacoes = [
+            ...new Set(
+                evidencias
+                    .map(item => item.relacao_id)
+                    .filter(Boolean)
+            )
+        ];
+
+        let relacoes = [];
+
+        if (idsRelacoes.length > 0) {
+            const { data: dadosRelacoes, error: erroRelacoes } =
+                await supabase
+                    .from('relacao')
+                    .select('id, origem_id, destino_id, tipo_relacao, estado')
+                    .in('id', idsRelacoes);
+
+            if (erroRelacoes) {
+                console.error(
+                    'Erro ao consultar relacionamentos das evidências:',
+                    erroRelacoes.message
+                );
+
+                return res.status(500).json({
+                    status: 'erro',
+                    mensagem: 'Não foi possível consultar os relacionamentos das evidências.'
+                });
+            }
+
+            relacoes = dadosRelacoes ?? [];
+        }
+
+        // Identificar todos os elementos associados
+        const idsElementos = [
+            ...new Set([
+                ...evidencias
+                    .map(item => item.elemento_id)
+                    .filter(Boolean),
+
+                ...relacoes.flatMap(relacao => [
+                    relacao.origem_id,
+                    relacao.destino_id
+                ])
+            ])
+        ];
+
+        let elementos = [];
+
+        if (idsElementos.length > 0) {
+            const { data: dadosElementos, error: erroElementos } =
+                await supabase
+                    .from('elemento')
+                    .select('id, tipo, nome, descricao, estado')
+                    .in('id', idsElementos);
+
+            if (erroElementos) {
+                console.error(
+                    'Erro ao consultar elementos das evidências:',
+                    erroElementos.message
+                );
+
+                return res.status(500).json({
+                    status: 'erro',
+                    mensagem: 'Não foi possível consultar os elementos das evidências.'
+                });
+            }
+
+            elementos = dadosElementos ?? [];
+        }
+
+        // Criar mapas de consulta rápida
+        const mapaElementos = new Map(
+            elementos.map(elemento => [elemento.id, elemento])
+        );
+
+        const mapaRelacoes = new Map(
+            relacoes.map(relacao => [relacao.id, relacao])
+        );
+
+        // Organizar as evidências com seus vínculos
+        const resultado = evidencias.map(evidencia => {
+            const relacao = mapaRelacoes.get(evidencia.relacao_id);
+
+            return {
+                ...evidencia,
+
+                elemento: evidencia.elemento_id
+                    ? mapaElementos.get(evidencia.elemento_id) ?? null
+                    : null,
+
+                relacao: relacao
+                    ? {
+                        ...relacao,
+                        origem: mapaElementos.get(relacao.origem_id) ?? null,
+                        destino: mapaElementos.get(relacao.destino_id) ?? null
+                    }
+                    : null
+            };
+        });
+
+        return res.status(200).json({
+            status: 'sucesso',
+            mensagem: 'Evidências consultadas com sucesso.',
+            pagina,
+            limite,
+            total: count ?? 0,
+            totalPaginas: Math.ceil((count ?? 0) / limite),
+            quantidade: resultado.length,
+            evidencias: resultado
+        });
+
+    } catch (error) {
+        console.error('Erro interno:', error);
+
+        return res.status(500).json({
+            status: 'erro',
+            mensagem: 'Erro interno do servidor.'
+        });
+    }
+});
+
+/* ROTA: INDICADORES GERAIS DA MATRIZ */
+app.get('/api/indicadores', async (req, res) => {
+    try {
+        // Função para contar registros no Supabase
+        const contarRegistros = async (tabela, estado = null) => {
+            let consulta = supabase
+                .from(tabela)
+                .select('id', {
+                    count: 'exact',
+                    head: true
+                });
+
+            if (estado) {
+                consulta = consulta.eq('estado', estado);
+            }
+
+            const { count, error } = await consulta;
+
+            if (error) {
+                throw error;
+            }
+
+            return count ?? 0;
+        };
+
+        const estados = [
+            'EXTRAIDO',
+            'SUGERIDO',
+            'VALIDADO',
+            'DESATUALIZADO'
+        ];
+
+        // Executar as contagens em paralelo
+        const resultados = await Promise.all([
+            contarRegistros('elemento'),
+            contarRegistros('relacao'),
+            contarRegistros('evidencia'),
+
+            ...estados.map(estado =>
+                contarRegistros('elemento', estado)
+            ),
+
+            ...estados.map(estado =>
+                contarRegistros('relacao', estado)
+            )
+        ]);
+
+        const [
+            totalElementos,
+            totalRelacionamentos,
+            totalEvidencias,
+            ...contagens
+        ] = resultados;
+
+        // Organizar contagens por estado
+        const elementosPorEstado = {};
+        const relacionamentosPorEstado = {};
+
+        estados.forEach((estado, indice) => {
+            elementosPorEstado[estado] = contagens[indice];
+
+            relacionamentosPorEstado[estado] =
+                contagens[indice + estados.length];
+        });
+
+        return res.status(200).json({
+            status: 'sucesso',
+            mensagem: 'Indicadores consultados com sucesso.',
+
+            indicadores: {
+                totalElementos,
+                totalRelacionamentos,
+                totalEvidencias,
+                elementosPorEstado,
+                relacionamentosPorEstado
+            }
+        });
+
+    } catch (error) {
+        console.error('Erro ao consultar indicadores:', error.message);
+
+        return res.status(500).json({
+            status: 'erro',
+            mensagem: 'Não foi possível consultar os indicadores.'
+        });
+    }
+});
+
 // ROTA 1: CONSULTAR ELEMENTO PELO ID
 app.get('/api/elementos/:id', async (req, res) => {
     try {
