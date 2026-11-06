@@ -508,7 +508,6 @@ app.get('/api/elementos/:id/relacoes', async (req, res) => {
     }
 });
 
-
 // =====================================================
 // 9. LISTAR EVIDÊNCIAS
 // =====================================================
@@ -1202,14 +1201,20 @@ app.use((error, req, res, next) => {
 
 const PORT = Number(process.env.PORT) || 3000;
 
-const servidor = app.listen(PORT, '0.0.0.0', () => {
-    console.log('=================================');
-    console.log(' API MATRIZ INTEGRADA');
-    console.log(` Servidor: http://localhost:${PORT}`);
-    console.log('=================================');
-});
+// Inicialização local do servidor
+if (process.env.VERCEL !== '1') {
+    const servidor = app.listen(PORT, '0.0.0.0', () => {
+        console.log('=================================');
+        console.log(' API MATRIZ INTEGRADA');
+        console.log(` Servidor: http://localhost:${PORT}`);
+        console.log('=================================');
+    });
 
-servidor.on('error', error => {
-    console.error('Erro ao iniciar o servidor:', error);
-    process.exit(1);
-});
+    servidor.on('error', error => {
+        console.error('Erro ao iniciar o servidor:', error);
+        process.exit(1);
+    });
+}
+
+// Exportação da aplicação para o Vercel
+export default app;

@@ -3,4 +3,5 @@ dist/
 .env
 .env.*
 !.env.example
-npm-debug.log*dist/
+npm-debug.log*
+.vercel/
