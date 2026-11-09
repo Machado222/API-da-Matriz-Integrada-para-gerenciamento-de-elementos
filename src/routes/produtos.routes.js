@@ -26,7 +26,8 @@ const CAMPOS = `
 
 function validarId(id) {
     return typeof id === 'string' &&
-        /^[1-9]\d*$/.test(id);
+        /^[1-9]\d*$/.test(id) &&
+        Number.isSafeInteger(Number(id));
 }
 
 // =====================================================
@@ -106,7 +107,10 @@ function validarDadosProduto(entrada, criacao = false) {
 
         const texto = valor.trim();
 
-        if (!texto && ['codigo', 'nome', 'unidade_medida'].includes(campo)) {
+        if (
+            !texto &&
+            ['codigo', 'nome', 'unidade_medida'].includes(campo)
+        ) {
             return {
                 erro: `O campo ${campo} não pode ficar vazio.`
             };
@@ -513,7 +517,129 @@ router.put('/:id', async (req, res) => {
 });
 
 // =====================================================
-// 7. DESATIVAR PRODUTO
+// 7. EXCLUIR PRODUTO DEFINITIVAMENTE
+// DELETE /api/produtos/:id/permanente
+// =====================================================
+
+router.delete('/:id/permanente', async (req, res) => {
+    try {
+        const id = req.params.id;
+
+        if (!validarId(id)) {
+            return res.status(400).json({
+                status: 'erro',
+                mensagem: 'Informe um ID de produto válido.'
+            });
+        }
+
+        // Verificar movimentações vinculadas
+        const {
+            count: totalMovimentacoes,
+            error: erroMovimentacoes
+        } = await supabase
+            .from('mustang_movimentacoes')
+            .select('id', { count: 'exact', head: true })
+            .eq('produto_id', id);
+
+        if (erroMovimentacoes) {
+            console.error(
+                'Erro ao verificar movimentações:',
+                erroMovimentacoes.message
+            );
+
+            return res.status(500).json({
+                status: 'erro',
+                mensagem: 'Não foi possível verificar o histórico do produto.'
+            });
+        }
+
+        // Verificar pedidos de compra vinculados
+        const {
+            count: totalPedidos,
+            error: erroPedidos
+        } = await supabase
+            .from('mustang_pedidos_compra')
+            .select('id', { count: 'exact', head: true })
+            .eq('produto_id', id);
+
+        if (erroPedidos) {
+            console.error(
+                'Erro ao verificar pedidos:',
+                erroPedidos.message
+            );
+
+            return res.status(500).json({
+                status: 'erro',
+                mensagem: 'Não foi possível verificar os pedidos do produto.'
+            });
+        }
+
+        // Bloquear exclusão se houver dependências
+        if (
+            (totalMovimentacoes ?? 0) > 0 ||
+            (totalPedidos ?? 0) > 0
+        ) {
+            return res.status(409).json({
+                status: 'conflito',
+                mensagem: 'O produto não pode ser excluído definitivamente porque possui registros vinculados.',
+                dependencias: {
+                    movimentacoes: totalMovimentacoes ?? 0,
+                    pedidos_compra: totalPedidos ?? 0
+                }
+            });
+        }
+
+        // Excluir definitivamente
+        const { data, error } = await supabase
+            .from(TABELA)
+            .delete()
+            .eq('id', id)
+            .select(CAMPOS)
+            .maybeSingle();
+
+        if (error) {
+            console.error('Erro ao excluir produto:', error.message);
+
+            // Proteção adicional pelas restrições do banco
+            if (error.code === '23503') {
+                return res.status(409).json({
+                    status: 'conflito',
+                    mensagem: 'A exclusão foi bloqueada porque existem registros vinculados ao produto.'
+                });
+            }
+
+            return res.status(500).json({
+                status: 'erro',
+                mensagem: 'Não foi possível excluir o produto.'
+            });
+        }
+
+        if (!data) {
+            return res.status(404).json({
+                status: 'nao_encontrado',
+                mensagem: 'Produto não encontrado.',
+                idPesquisado: id
+            });
+        }
+
+        return res.status(200).json({
+            status: 'sucesso',
+            mensagem: 'Produto excluído definitivamente.',
+            produto: data
+        });
+
+    } catch (error) {
+        console.error('Erro ao excluir produto:', error);
+
+        return res.status(500).json({
+            status: 'erro',
+            mensagem: 'Erro interno do servidor.'
+        });
+    }
+});
+
+// =====================================================
+// 8. DESATIVAR PRODUTO
 // DELETE /api/produtos/:id
 // =====================================================
 
