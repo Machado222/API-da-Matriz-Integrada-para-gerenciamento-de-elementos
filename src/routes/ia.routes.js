@@ -13,6 +13,27 @@ const INSTRUCOES = `
 
 Você é o assistente inteligente do sistema Mustang, especializado em gerenciamento de estoque de autopeças.
 
+ESCOPO DE CONVERSA:
+
+1. Você pode responder perguntas gerais sobre tecnologia, informática, administração, negócios, gestão, educação, conceitos e outros assuntos.
+2. Não limite suas respostas exclusivamente ao gerenciamento de estoque.
+3. Quando a pergunta for geral, utilize seu conhecimento para respondê-la normalmente.
+4. Quando a pergunta envolver dados específicos do Mustang, utilize exclusivamente as informações fornecidas pelo Backend.
+5. A ausência de dados do Supabase não impede uma resposta sobre conhecimentos gerais.
+6. Nunca invente informações sobre funcionalidades, configurações ou dados internos do Mustang.
+7. Se não conhecer uma informação específica do sistema, informe essa limitação.
+
+PADRÃO DAS RESPOSTAS:
+
+1. Seja claro, direto e sucinto.
+2. Comece respondendo exatamente ao que foi perguntado.
+3. Prefira parágrafos curtos.
+4. Utilize listas quando facilitarem a compreensão.
+5. Evite introduções desnecessárias e repetições.
+6. Para perguntas simples, responda em poucas frases.
+7. Para análises complexas, apresente os principais resultados e recomendações de forma organizada.
+8. Não sacrifique a precisão para encurtar uma resposta.
+
 REGRAS GERAIS:
 
 1. Responda exclusivamente em português brasileiro.
@@ -105,33 +126,46 @@ function normalizarTexto(texto) {
 // 3. IDENTIFICAR QUAIS DADOS PRECISAM SER CONSULTADOS
 // =====================================================
 
+
 function identificarConsultas(pergunta) {
     const texto = normalizarTexto(pergunta);
 
+    // Perguntas conceituais devem ser respondidas pelo Gemini
+    // sem obrigar uma consulta ao banco de dados.
+    const perguntaConceitual =
+        /^(o que e|o que significa|defina|explique o conceito|para que serve|qual a diferenca|como funciona)\b/.test(texto);
+
     const reposicao =
-        /\b(reposicao|repor|ruptura|falta|necessidade de compra)\b/.test(texto);
+        !perguntaConceitual &&
+        /\b(reposicao|repor|ruptura|falta de estoque|necessidade de compra|precisa de reposicao|precisam de reposicao)\b/.test(texto);
 
     const analiseMovimentacoes =
-        /\b(analise|analisar|giro|tendencia|risco|cobertura|excesso|parado|parados|parada|paradas|sem movimentacao|sem saida|mais movimentados|menos movimentados|alto giro|baixo giro|maior giro|menor giro|maior consumo|menor consumo|ranking|media diaria|dias de cobertura|ultimos 30 dias|registros de saida|quantidade de saidas|unidades que sairam|classificacao|classificar)\b/.test(texto);
+        !perguntaConceitual &&
+        /\b(giro do estoque|giro de estoque|analise do estoque|analise de estoque|analisar o estoque|analise de movimentacoes|analise das movimentacoes|tendencia de consumo|risco de ruptura|cobertura de estoque|excesso de estoque|estoque parado|sem movimentacao|sem saida|mais movimentados|menos movimentados|alto giro|baixo giro|maior giro|menor giro|maior consumo|menor consumo|ranking de giro|media de saida diaria|dias de cobertura|quantidade de saidas|unidades que sairam|classificacao de giro|classificacao de cobertura)\b/.test(texto);
 
     const movimentacoes =
+        !perguntaConceitual &&
         !analiseMovimentacoes &&
-        /\b(movimentac|entrada|saida|historico|consumo|venda)\w*\b/.test(texto);
+        /\b(movimentac\w*|entradas?|saidas?|historico de movimentacoes|consumo de produtos|vendas?)\b/.test(texto);
 
     const fornecedores =
+        !perguntaConceitual &&
         /\bfornecedor\w*\b/.test(texto);
 
     const pedidos =
-        reposicao ||
-        /\b(pedido|pedidos|compra|compras|recebimento)\b/.test(texto);
+        !perguntaConceitual &&
+        (
+            reposicao ||
+            /\b(pedidos? de compra|pedidos? em aberto|compras? de estoque|compras? de reposicao|recebimento de mercadorias)\b/.test(texto)
+        );
 
+    // Só consulta o estoque quando a pergunta realmente
+    // mencionar informações relacionadas ao catálogo ou saldo.
     const estoque =
+        !perguntaConceitual &&
         !reposicao &&
         !analiseMovimentacoes &&
-        (
-            /\b(estoque|saldo|quantidade|produto|produtos|baixo|minimo|disponivel)\b/.test(texto) ||
-            (!movimentacoes && !fornecedores && !pedidos)
-        );
+        /\b(estoque|saldo|quantidade|produto|produtos|peca|pecas|disponivel|minimo|itens cadastrados)\b/.test(texto);
 
     return {
         estoque,
@@ -142,6 +176,7 @@ function identificarConsultas(pergunta) {
         analiseMovimentacoes
     };
 }
+
 
 // =====================================================
 // 4. BLOQUEAR SOLICITAÇÕES DE OPERAÇÕES NO ESTOQUE
@@ -1179,6 +1214,13 @@ ${JSON.stringify(contexto)}
 
 REGRAS PARA ESTA RESPOSTA:
 
+- Responda perguntas gerais utilizando seu conhecimento.
+- Se o contexto estiver vazio e a pergunta for geral, não trate isso como falha.
+- Não invente informações específicas do Mustang.
+- Para informações internas do sistema, utilize somente dados confirmados pelo Backend.
+- Seja claro, objetivo e sucinto.
+- Comece pela resposta principal, sem introduções desnecessárias.
+
 - Utilize os dados consultados como fonte oficial.
 - Não invente informações ausentes.
 - Não afirme que executou nenhuma operação.
@@ -1233,9 +1275,9 @@ ORIENTAÇÕES PARA ANÁLISE:
         );
 
         return res.status(500).json({
-            status: 'erro',
-            mensagem: 'Não foi possível processar a pergunta. Verifique o Backend, o Supabase e o serviço Ollama.'
-        });
+    status: 'erro',
+    mensagem: 'Não foi possível gerar a resposta. Verifique a conexão com o Gemini e, quando necessário, com o Supabase.'
+});
     }
 });
 

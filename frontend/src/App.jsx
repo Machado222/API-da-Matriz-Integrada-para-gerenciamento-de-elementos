@@ -1,5 +1,12 @@
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
+
 import { FaHorseHead, FaGear } from "react-icons/fa6";
 
 import {
@@ -90,35 +97,9 @@ const FORM_FORNECEDOR_INICIAL = {
 };
 
 // =====================================================
-// FUNCOES AUXILIARES
+// SUGESTOES DO ASSISTENTE
 // =====================================================
 
-const moeda = (valor) =>
-  Number(valor ?? 0).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL"
-  });
-
-const numero = (valor) =>
-  Number(valor ?? 0).toLocaleString("pt-BR");
-
-const normalizarTexto = (valor) =>
-  String(valor ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase();
-
-const formatarData = (valor, horario = false) => {
-  if (!valor) return "—";
-
-  const data = new Date(valor);
-
-  if (Number.isNaN(data.getTime())) return "—";
-
-  return horario
-    ? data.toLocaleString("pt-BR")
-    : data.toLocaleDateString("pt-BR");
-};
 const SUGESTOES_INICIAIS = [
   "Quais produtos precisam de reposição?",
   "Quais produtos estão com estoque baixo?",
@@ -179,8 +160,82 @@ const BANCO_SUGESTOES = {
   ]
 };
 
-function gerarSugestoesRelacionadas(pergunta, resposta, excluidas = []) {
- const texto = normalizarTexto(`${pergunta} ${resposta}`);
+// =====================================================
+// FUNCOES AUXILIARES
+// =====================================================
+
+const moeda = (valor) =>
+  Number(valor ?? 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+
+const numero = (valor) =>
+  Number(valor ?? 0).toLocaleString("pt-BR");
+
+const normalizarTexto = (valor) =>
+  String(valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+
+const formatarData = (valor, horario = false) => {
+  if (!valor) return "—";
+
+  const data = new Date(valor);
+
+  if (Number.isNaN(data.getTime())) return "—";
+
+  return horario
+    ? data.toLocaleString("pt-BR")
+    : data.toLocaleDateString("pt-BR");
+};
+
+function classificarEstoque(item) {
+  const quantidade = Number(item?.quantidade_atual ?? 0);
+  const minimo = Number(item?.estoque_minimo ?? 0);
+
+  if (quantidade <= 0) return "SEM ESTOQUE";
+  if (minimo > 0 && quantidade <= minimo) return "BAIXO";
+
+  return "NORMAL";
+}
+
+function obterNomeProduto(produtoId, produtos) {
+  const produto = produtos.find(
+    (item) => Number(item.id) === Number(produtoId)
+  );
+
+  return produto?.nome || `Produto #${produtoId ?? "—"}`;
+}
+
+function obterNecessidade(item) {
+  const flag = item?.necessita_pedido;
+
+  const flagAtivo =
+    flag === true ||
+    flag === 1 ||
+    String(flag).toLowerCase() === "true" ||
+    String(flag).toLowerCase() === "sim";
+
+  const saldo = Number(item?.quantidade_atual ?? 0);
+  const minimo = Number(item?.estoque_minimo ?? 0);
+  const sugerida = Number(item?.quantidade_sugerida ?? 0);
+
+  return flagAtivo || (sugerida > 0 && saldo <= minimo);
+}
+
+// =====================================================
+// GERAR SUGESTOES RELACIONADAS
+// =====================================================
+
+function gerarSugestoesRelacionadas(
+  pergunta,
+  resposta,
+  excluidas = []
+) {
+  const texto = normalizarTexto(`${pergunta} ${resposta}`);
+
   let tema = "geral";
 
   if (texto.includes("FORNECEDOR")) {
@@ -232,40 +287,6 @@ function gerarSugestoesRelacionadas(pergunta, resposta, excluidas = []) {
       (item) => !jaUtilizadas.has(normalizarTexto(item))
     )
     .slice(0, 3);
-}
-
-function classificarEstoque(item) {
-  const quantidade = Number(item?.quantidade_atual ?? 0);
-  const minimo = Number(item?.estoque_minimo ?? 0);
-
-  if (quantidade <= 0) return "SEM ESTOQUE";
-  if (minimo > 0 && quantidade <= minimo) return "BAIXO";
-
-  return "NORMAL";
-}
-
-function obterNomeProduto(produtoId, produtos) {
-  const produto = produtos.find(
-    (item) => Number(item.id) === Number(produtoId)
-  );
-
-  return produto?.nome || `Produto #${produtoId ?? "—"}`;
-}
-
-function obterNecessidade(item) {
-  const flag = item?.necessita_pedido;
-
-  const flagAtivo =
-    flag === true ||
-    flag === 1 ||
-    String(flag).toLowerCase() === "true" ||
-    String(flag).toLowerCase() === "sim";
-
-  const saldo = Number(item?.quantidade_atual ?? 0);
-  const minimo = Number(item?.estoque_minimo ?? 0);
-  const sugerida = Number(item?.quantidade_sugerida ?? 0);
-
-  return flagAtivo || (sugerida > 0 && saldo <= minimo);
 }
 
 // =====================================================
@@ -788,7 +809,35 @@ function GraficoReposicao({ data }) {
 // =====================================================
 
 export default function App() {
-  const [pagina, setPagina] = useState("inicio");
+  // =====================================================
+  // PAGINA ATUAL - PERSISTENCIA NO NAVEGADOR
+  // =====================================================
+
+  const [pagina, setPagina] = useState(() => {
+    try {
+      const paginaSalva = localStorage.getItem(
+        "mustang_pagina_ativa"
+      );
+
+      return MENU.some((item) => item.id === paginaSalva)
+        ? paginaSalva
+        : "inicio";
+    } catch {
+      return "inicio";
+    }
+  });
+
+  // Salva a página sempre que o usuário navega.
+  useEffect(() => {
+    try {
+      localStorage.setItem("mustang_pagina_ativa", pagina);
+    } catch (error) {
+      console.warn(
+        "Não foi possível salvar a página atual:",
+        error
+      );
+    }
+  }, [pagina]);
 
   const [sidebarRecolhida, setSidebarRecolhida] = useState(false);
   const [menuMobileAberto, setMenuMobileAberto] = useState(false);
@@ -831,17 +880,66 @@ export default function App() {
     ...FORM_MOVIMENTACAO_INICIAL
   });
 
-  // IA preservada.
- const [pergunta, setPergunta] = useState("");
-const [historicoIA, setHistoricoIA] = useState([]);
-const [carregandoIA, setCarregandoIA] = useState(false);
+  // =====================================================
+  // ESTADOS DA IA
+  // =====================================================
 
-const [sugestoesIA, setSugestoesIA] = useState(
-  SUGESTOES_INICIAIS
-);
+  const [pergunta, setPergunta] = useState("");
+  const [historicoIA, setHistoricoIA] = useState([]);
+  const [carregandoIA, setCarregandoIA] = useState(false);
 
-const [sugestoesExibidasIA, setSugestoesExibidasIA] = useState([]);
+  const [sugestoesIA, setSugestoesIA] = useState(
+    SUGESTOES_INICIAIS
+  );
 
+  const [sugestoesExibidasIA, setSugestoesExibidasIA] = useState([]);
+
+  // Referência da área de mensagens para controlar a rolagem.
+  const chatMessagesRef = useRef(null);
+  const ultimaRespostaRef = useRef(null);
+
+  // =====================================================
+  // ROLAGEM AUTOMATICA DO CHAT
+  // =====================================================
+
+ // =====================================================
+// ROLAGEM AUTOMATICA PARA O INICIO DA RESPOSTA
+// =====================================================
+
+useEffect(() => {
+  if (pagina !== "ia" || carregandoIA) return;
+
+  const ultimaMensagem =
+    historicoIA[historicoIA.length - 1];
+
+  if (!ultimaMensagem || ultimaMensagem.role !== "assistant") {
+    return;
+  }
+
+  const container = chatMessagesRef.current;
+  const resposta = ultimaRespostaRef.current;
+
+  if (!container || !resposta) return;
+
+  const frame = requestAnimationFrame(() => {
+    const containerRect = container.getBoundingClientRect();
+    const respostaRect = resposta.getBoundingClientRect();
+
+    const posicaoResposta =
+      container.scrollTop +
+      respostaRect.top -
+      containerRect.top -
+      12;
+
+    container.scrollTo({
+      top: posicaoResposta,
+      behavior: "smooth"
+    });
+  });
+
+  return () => cancelAnimationFrame(frame);
+
+}, [pagina, historicoIA, carregandoIA]);
   // =====================================================
   // CARREGAMENTO DOS DADOS
   // =====================================================
@@ -1445,80 +1543,81 @@ const [sugestoesExibidasIA, setSugestoesExibidasIA] = useState([]);
   // ASSISTENTE IA
   // =====================================================
 
-async function enviarPerguntaTexto(textoOriginal) {
-  const texto = textoOriginal.trim();
+  async function enviarPerguntaTexto(textoOriginal) {
+    const texto = textoOriginal.trim();
 
-  if (!texto || carregandoIA) return;
+    if (!texto || carregandoIA) return;
 
-  const historicoAnterior = historicoIA.slice(-8);
-
-  setHistoricoIA((atual) => [
-    ...atual,
-    { role: "user", content: texto }
-  ]);
-
-  setPergunta("");
-  setCarregandoIA(true);
-
-  try {
-    const resposta = await api.perguntarIA(
-      texto,
-      historicoAnterior
-    );
-
-    const conteudoResposta =
-      resposta.resposta ||
-      resposta.mensagem ||
-      "Não foi possível obter uma resposta.";
+    const historicoAnterior = historicoIA.slice(-8);
 
     setHistoricoIA((atual) => [
       ...atual,
-      {
-        role: "assistant",
-        content: conteudoResposta
-      }
+      { role: "user", content: texto }
     ]);
 
-    const perguntasAnteriores = historicoIA
-      .filter((mensagem) => mensagem.role === "user")
-      .map((mensagem) => mensagem.content);
+    setPergunta("");
+    setCarregandoIA(true);
 
-    const novasSugestoes = gerarSugestoesRelacionadas(
-      texto,
-      conteudoResposta,
-      [
-        ...perguntasAnteriores,
+    try {
+      const resposta = await api.perguntarIA(
         texto,
-        ...sugestoesExibidasIA,
-        ...sugestoesIA
-      ]
-    );
+        historicoAnterior
+      );
 
-    setSugestoesExibidasIA((atual) => [
-      ...atual,
-      ...sugestoesIA,
-      ...novasSugestoes
-    ]);
+      const conteudoResposta =
+        resposta.resposta ||
+        resposta.mensagem ||
+        "Não foi possível obter uma resposta.";
 
-    setSugestoesIA(novasSugestoes);
+      setHistoricoIA((atual) => [
+        ...atual,
+        {
+          role: "assistant",
+          content: conteudoResposta
+        }
+      ]);
 
-  } catch (error) {
-    setHistoricoIA((atual) => [
-      ...atual,
-      {
-        role: "assistant",
-        content: `Não foi possível obter uma resposta: ${error.message}`
-      }
-    ]);
-  } finally {
-    setCarregandoIA(false);
+      const perguntasAnteriores = historicoIA
+        .filter((mensagem) => mensagem.role === "user")
+        .map((mensagem) => mensagem.content);
+
+      const novasSugestoes = gerarSugestoesRelacionadas(
+        texto,
+        conteudoResposta,
+        [
+          ...perguntasAnteriores,
+          texto,
+          ...sugestoesExibidasIA,
+          ...sugestoesIA
+        ]
+      );
+
+      setSugestoesExibidasIA((atual) => [
+        ...atual,
+        ...sugestoesIA,
+        ...novasSugestoes
+      ]);
+
+      setSugestoesIA(novasSugestoes);
+
+    } catch (error) {
+      setHistoricoIA((atual) => [
+        ...atual,
+        {
+          role: "assistant",
+          content: `Não foi possível obter uma resposta: ${error.message}`
+        }
+      ]);
+    } finally {
+      setCarregandoIA(false);
+    }
   }
-}
 
-function enviarPergunta(event) {
-  event.preventDefault();
-  enviarPerguntaTexto(pergunta);
-}
+  function enviarPergunta(event) {
+    event.preventDefault();
+    enviarPerguntaTexto(pergunta);
+  }
+
   // =====================================================
   // PAGINA INICIAL
   // =====================================================
@@ -2506,121 +2605,140 @@ function enviarPergunta(event) {
   // ASSISTENTE IA
   // =====================================================
 
- function paginaIA() {
-  return (
-    <>
-      <Titulo
-        eyebrow="INTELIGÊNCIA / ASSISTENTE"
-        title="Mustang Assistente"
-        description="Consulte informações e receba análises inteligentes do seu estoque."
-      />
+  function paginaIA() {
+    return (
+      <>
+        <Titulo
+          eyebrow="INTELIGÊNCIA / ASSISTENTE"
+          title="Mustang Assistente"
+          description="Seu assistente inteligente para análise e gestão de estoque."
+        />
 
-      <section className="panel chat-panel">
-        <div className="chat-messages">
-
-          {historicoIA.length === 0 && (
-            <div className="chat-welcome">
-              <div className="chat-avatar">
-                <HorseMark />
-              </div>
-
-              <h2>Bem-vindo ao Mustang Assistente</h2>
-
-              <p>
-                Posso analisar seu estoque, consultar movimentações,
-                identificar riscos e ajudar no planejamento de reposição.
-              </p>
-            </div>
-          )}
-
-          {historicoIA.map((mensagem, index) => (
-            <div
-              key={index}
-              className={`chat-message ${
-                mensagem.role === "user"
-                  ? "chat-user"
-                  : "chat-assistant"
-              }`}
-            >
-              <span>
-                {mensagem.role === "user"
-                  ? "Você"
-                  : "Mustang IA"}
-              </span>
-
-              <p>{mensagem.content}</p>
-            </div>
-          ))}
-
-          {carregandoIA && (
-            <div className="chat-message chat-assistant">
-              <span>Mustang IA</span>
-
-              <div className="chat-typing">
-                <i />
-                <i />
-                <i />
-                <small>Analisando os dados...</small>
-              </div>
-            </div>
-          )}
-
-          {!carregandoIA && sugestoesIA.length > 0 && (
-            <div className="chat-suggestions">
-              <div className="chat-suggestions-heading">
-                <strong>
-                  {historicoIA.length === 0
-                    ? "POR ONDE COMEÇAR?"
-                    : "PRÓXIMAS PERGUNTAS"}
-                </strong>
-
-                <span>
-                  Sugestões para continuar a conversa
-                </span>
-              </div>
-
-              <div className="suggested-questions">
-                {sugestoesIA.map((texto) => (
-                  <button
-                    key={texto}
-                    type="button"
-                    className="suggestion-chip"
-                    disabled={carregandoIA}
-                    onClick={() => enviarPerguntaTexto(texto)}
-                  >
-                    {texto}
-                    <span aria-hidden="true">↗</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <form
-          className="chat-form"
-          onSubmit={enviarPergunta}
-        >
-          <textarea
-            rows="2"
-            placeholder="Pergunte algo sobre seu estoque..."
-            value={pergunta}
-            onChange={(event) => setPergunta(event.target.value)}
-            maxLength="2000"
-            disabled={carregandoIA}
-          />
-
-          <Botao
-            type="submit"
-            disabled={carregandoIA || !pergunta.trim()}
+        <section className="panel chat-panel">
+          <div
+            className="chat-messages"
+            ref={chatMessagesRef}
           >
-            {carregandoIA ? "Consultando..." : "Enviar"}
-          </Botao>
-        </form>
-      </section>
-    </>
-  );
-}
+            {historicoIA.length === 0 && (
+              <div className="chat-welcome">
+                <div className="chat-avatar">
+                  <HorseMark />
+                </div>
+
+                <h2>Bem-vindo ao Mustang Assistente</h2>
+
+                <p>
+                  Sou o assistente inteligente do Mustang.
+                  Posso ajudar você a consultar o estoque,
+                  analisar movimentações e identificar necessidades de reposição.
+                </p>
+              </div>
+            )}
+{historicoIA.map((mensagem, index) => (
+  <div
+    key={index}
+    ref={
+      mensagem.role === "assistant" &&
+      index === historicoIA.length - 1
+        ? ultimaRespostaRef
+        : null
+    }
+    className={`chat-message ${
+      mensagem.role === "user"
+        ? "chat-user"
+        : "chat-assistant"
+    }`}
+  >
+                <span>
+                  {mensagem.role === "user" ? "Você" : "Mustang IA"}
+                </span>
+
+                <p>{mensagem.content}</p>
+              </div>
+            ))}
+
+            {carregandoIA && (
+              <div className="chat-message chat-assistant">
+                <span>Mustang IA</span>
+
+                <div className="chat-typing">
+                  <i />
+                  <i />
+                  <i />
+                  <small>Analisando os dados...</small>
+                </div>
+              </div>
+            )}
+
+            {!carregandoIA && sugestoesIA.length > 0 && (
+              <div className="chat-suggestions">
+                <div className="chat-suggestions-heading">
+                  <strong>
+                    {historicoIA.length === 0
+                      ? "POR ONDE COMEÇAR?"
+                      : "PRÓXIMAS PERGUNTAS"}
+                  </strong>
+
+                  <span>
+                    Sugestões para continuar a conversa
+                  </span>
+                </div>
+
+                <div className="suggested-questions">
+                  {sugestoesIA.map((texto) => (
+                    <button
+                      key={texto}
+                      type="button"
+                      className="suggestion-chip"
+                      disabled={carregandoIA}
+                      onClick={() => enviarPerguntaTexto(texto)}
+                    >
+                      {texto}
+                      <span aria-hidden="true">↗</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <form
+            className="chat-form"
+            onSubmit={enviarPergunta}
+          >
+            <textarea
+              rows="2"
+              placeholder="Pergunte algo sobre seu estoque..."
+              value={pergunta}
+              onChange={(event) => setPergunta(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault();
+
+                  if (pergunta.trim() && !carregandoIA) {
+                    enviarPerguntaTexto(pergunta);
+                  }
+                }
+              }}
+              maxLength="2000"
+              disabled={carregandoIA}
+            />
+
+            <Botao
+              type="submit"
+              disabled={carregandoIA || !pergunta.trim()}
+            >
+              {carregandoIA ? "Consultando..." : "Enviar"}
+            </Botao>
+          </form>
+        </section>
+      </>
+    );
+  }
 
   // =====================================================
   // RENDERIZACAO DAS PAGINAS
