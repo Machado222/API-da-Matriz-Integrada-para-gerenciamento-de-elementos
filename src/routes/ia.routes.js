@@ -1,7 +1,7 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
-import { conversarComOllama } from '../ollama.js';
+import { conversarComGemini } from '../gemini.js';
 
 const router = Router();
 
@@ -1212,7 +1212,7 @@ ORIENTAÇÕES PARA ANÁLISE:
         // 18. GERAR RESPOSTA COM O OLLAMA
         // =================================================
 
-        const resposta = await conversarComOllama(mensagens);
+        const resposta = await conversarComGemini(mensagens);
 
         // =================================================
         // 19. RETORNAR RESPOSTA

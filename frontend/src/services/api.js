@@ -1,151 +1,239 @@
-// ============================================
-// MUSTANG SISTEMA INTEGRADO
-// Serviço de comunicação com o Backend
-// ============================================
 
-async function request(url) {
-  let response;
+const BASE_URL = "/api";
 
-  try {
-    response = await fetch(url, {
-      headers: {
+async function request(path, options = {}) {
+    const {
+        method = "GET",
+        body,
+        signal
+    } = options;
+
+    const headers = {
         Accept: "application/json"
-      }
+    };
+
+    if (body !== undefined) {
+        headers["Content-Type"] = "application/json";
+    }
+
+    let response;
+
+    try {
+        response = await fetch(`${BASE_URL}${path}`, {
+            method,
+            headers,
+            body: body !== undefined
+                ? JSON.stringify(body)
+                : undefined,
+            signal
+        });
+    } catch (error) {
+        if (error.name === "AbortError") {
+            throw error;
+        }
+
+        throw new Error(
+            "Não foi possível conectar ao Backend Mustang. Verifique se o servidor está ativo."
+        );
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+
+    let data;
+
+    if (contentType.includes("application/json")) {
+        data = await response.json();
+    } else {
+        data = await response.text();
+    }
+
+    if (!response.ok) {
+        const mensagem =
+            typeof data === "object"
+                ? data?.mensagem
+                : data;
+
+        throw new Error(
+            mensagem || `Erro HTTP ${response.status}.`
+        );
+    }
+
+    return data;
+}
+
+function criarParametros(filtros = {}) {
+    const parametros = new URLSearchParams();
+
+    parametros.set("pagina", filtros.pagina ?? "1");
+    parametros.set("limite", filtros.limite ?? "100");
+
+    Object.entries(filtros).forEach(([chave, valor]) => {
+        if (
+            !["pagina", "limite"].includes(chave) &&
+            valor !== undefined &&
+            valor !== null &&
+            valor !== ""
+        ) {
+            parametros.set(chave, String(valor));
+        }
     });
-  } catch {
-    throw new Error(
-      "Não foi possível conectar ao backend. Confira se o servidor está ativo na porta 3000."
-    );
-  }
 
-  if (response.status === 401 || response.status === 403) {
-    throw new Error(
-      "Acesso negado pela API. Confira a API_ACCESS_KEY e a configuração do proxy."
-    );
-  }
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-
-    throw new Error(
-      `Erro HTTP ${response.status}: ${
-        detail || "Não foi possível consultar os dados."
-      }`
-    );
-  }
-
-  return response.json();
+    return `?${parametros.toString()}`;
 }
 
-// Extrair registros conforme o formato da resposta.
-function getRows(payload, key) {
-  if (Array.isArray(payload)) return payload;
-
-  if (Array.isArray(payload?.[key])) {
-    return payload[key];
-  }
-
-  if (Array.isArray(payload?.data)) {
-    return payload.data;
-  }
-
-  if (Array.isArray(payload?.items)) {
-    return payload.items;
-  }
-
-  return [];
-}
-
-// Buscar todas as páginas.
-// O backend permite até 100 registros por página.
-async function getAllPages(path, key) {
-  const all = [];
-  const limit = 100;
-  let page = 1;
-
-  while (true) {
-    const separator = path.includes("?") ? "&" : "?";
-
-    const payload = await request(
-      `${path}${separator}pagina=${page}&limite=${limit}`
-    );
-
-    const rows = getRows(payload, key);
-
-    all.push(...rows);
-
-    if (rows.length < limit) {
-      break;
-    }
-
-    if (page > 1000) {
-      throw new Error("Limite de paginação excedido.");
-    }
-
-    page++;
-  }
-
-  return all;
-}
-
-// Normalizar relacionamentos.
-// O backend retorna origem e destino como objetos.
-function normalizeRelations(relations) {
-  return relations.map((relation) => ({
-    ...relation,
-
-    origem_id:
-      relation.origem?.id ??
-      relation.origem_id ??
-      null,
-
-    destino_id:
-      relation.destino?.id ??
-      relation.destino_id ??
-      null
-  }));
-}
-
-// ============================================
-// API PRINCIPAL
-// ============================================
+// =====================================================
+// API PRINCIPAL DO MUSTANG
+// =====================================================
 
 export const api = {
 
-  // Buscar elementos, relacionamentos e evidências.
-  async getOverview() {
-    const [elements, relations, evidence] = await Promise.all([
-      getAllPages("/api/elementos", "elementos"),
+    // CONEXÃO
 
-      getAllPages("/api/relacoes", "relacoes"),
+    async testarConexao() {
+        return request("/teste-conexao");
+    },
 
-      getAllPages("/api/evidencias", "evidencias")
-    ]);
+    // PRODUTOS
 
-    return {
-      elements,
-      relations: normalizeRelations(relations),
-      evidence
-    };
-  },
+    async listarProdutos(filtros = {}) {
+        const resposta = await request(
+            `/produtos${criarParametros(filtros)}`
+        );
 
-  // Consultar impactos de um elemento.
-  async getImpacts(id, depth = 5, state = "") {
-    const params = new URLSearchParams({
-      profundidade: String(depth)
-    });
+        return resposta.produtos ?? [];
+    },
 
-    if (state) {
-      params.set("estado", state);
+    async consultarProduto(id) {
+        const resposta = await request(`/produtos/${id}`);
+        return resposta.produto;
+    },
+
+    async cadastrarProduto(dados) {
+        const resposta = await request("/produtos", {
+            method: "POST",
+            body: dados
+        });
+
+        return resposta.produto;
+    },
+
+    async atualizarProduto(id, dados) {
+        const resposta = await request(`/produtos/${id}`, {
+            method: "PUT",
+            body: dados
+        });
+
+        return resposta.produto;
+    },
+
+    async desativarProduto(id) {
+        return request(`/produtos/${id}`, {
+            method: "DELETE"
+        });
+    },
+
+    // ESTOQUE
+
+    async listarEstoque(filtros = {}) {
+        const resposta = await request(
+            `/estoque${criarParametros(filtros)}`
+        );
+
+        return resposta.estoques ?? [];
+    },
+
+    async consultarEstoqueProduto(id) {
+        return request(`/estoque/${id}`);
+    },
+
+    // MOVIMENTAÇÕES
+
+    async listarMovimentacoes(filtros = {}) {
+        const resposta = await request(
+            `/movimentacoes${criarParametros(filtros)}`
+        );
+
+        return resposta.movimentacoes ?? [];
+    },
+
+    async registrarMovimentacao(dados) {
+        return request("/movimentacoes", {
+            method: "POST",
+            body: dados
+        });
+    },
+
+    // FORNECEDORES
+
+    async listarFornecedores(filtros = {}) {
+        const resposta = await request(
+            `/fornecedores${criarParametros(filtros)}`
+        );
+
+        return resposta.fornecedores ?? [];
+    },
+
+    async cadastrarFornecedor(dados) {
+        const resposta = await request("/fornecedores", {
+            method: "POST",
+            body: dados
+        });
+
+        return resposta.fornecedor;
+    },
+
+    // REPOSIÇÃO
+
+    async listarNecessidadesReposicao(filtros = {}) {
+        const resposta = await request(
+            `/pedidos-compra/reposicao${criarParametros(filtros)}`
+        );
+
+        return resposta.produtos ?? [];
+    },
+
+    // PEDIDOS DE COMPRA
+
+    async listarPedidos(filtros = {}) {
+        const resposta = await request(
+            `/pedidos-compra${criarParametros(filtros)}`
+        );
+
+        return resposta.pedidos ?? [];
+    },
+
+    async cadastrarPedido(dados) {
+        const resposta = await request("/pedidos-compra", {
+            method: "POST",
+            body: dados
+        });
+
+        return resposta.pedido;
+    },
+
+    async atualizarStatusPedido(id, status) {
+        return request(`/pedidos-compra/${id}/status`, {
+            method: "PATCH",
+            body: { status }
+        });
+    },
+
+    async receberPedido(id) {
+        return request(`/pedidos-compra/${id}/receber`, {
+            method: "POST",
+            body: {}
+        });
+    },
+
+    // ASSISTENTE IA
+
+    async perguntarIA(pergunta, historico = []) {
+        return request("/ia/perguntar", {
+            method: "POST",
+            body: {
+                pergunta,
+                historico
+            }
+        });
     }
-
-    return request(
-      `/api/elementos/${encodeURIComponent(id)}/impactos?${params.toString()}`
-    );
-  },
-
-  // Testar conexão com o backend.
-  async testConnection() {
-    return request("/api/teste-conexao");
-  }
 };
