@@ -1033,6 +1033,27 @@ useEffect(() => {
     [produtos]
   );
 
+
+const estoquesCatalogo = useMemo(() => {
+  const idsProdutos = new Set(
+    produtosCatalogo.map((produto) => Number(produto.id))
+  );
+
+  return estoques.filter((item) =>
+    idsProdutos.has(Number(item.produto_id))
+  );
+}, [estoques, produtosCatalogo]);
+const movimentacoesCatalogo = useMemo(() => {
+  const idsProdutos = new Set(
+    produtosCatalogo.map((produto) => Number(produto.id))
+  );
+
+  return movimentacoes.filter((item) =>
+    idsProdutos.has(Number(item.produto_id))
+  );
+}, [movimentacoes, produtosCatalogo]);
+
+
   const produtosFiltrados = useMemo(() => {
     const termo = busca.toLowerCase().trim();
 
@@ -1055,54 +1076,56 @@ useEffect(() => {
     });
   }, [produtosCatalogo, busca]);
 
-  const estoqueBaixo = useMemo(
-    () =>
-      estoques.filter(
-        (item) =>
-          Number(item.quantidade_atual ?? 0) <=
-          Number(item.estoque_minimo ?? 0)
-      ),
-    [estoques]
-  );
+ 
+const estoqueBaixo = useMemo(
+  () =>
+    estoquesCatalogo.filter(
+      (item) =>
+        Number(item.quantidade_atual ?? 0) <=
+        Number(item.estoque_minimo ?? 0)
+    ),
+  [estoquesCatalogo]
+);
 
-  const totalUnidades = useMemo(
-    () =>
-      estoques.reduce(
-        (total, item) =>
-          total + Number(item.quantidade_atual ?? 0),
-        0
-      ),
-    [estoques]
-  );
+const totalUnidades = useMemo(
+  () =>
+    estoquesCatalogo.reduce(
+      (total, item) =>
+        total + Number(item.quantidade_atual ?? 0),
+      0
+    ),
+  [estoquesCatalogo]
+);
 
-  const situacaoEstoque = useMemo(
-    () => [
-      {
-        label: "Normal",
-        value: estoques.filter(
-          (item) => classificarEstoque(item) === "NORMAL"
-        ).length
-      },
-      {
-        label: "Estoque baixo",
-        value: estoques.filter(
-          (item) => classificarEstoque(item) === "BAIXO"
-        ).length
-      },
-      {
-        label: "Sem estoque",
-        value: estoques.filter(
-          (item) => classificarEstoque(item) === "SEM ESTOQUE"
-        ).length
-      }
-    ],
-    [estoques]
-  );
+const situacaoEstoque = useMemo(
+  () => [
+    {
+      label: "Normal",
+      value: estoquesCatalogo.filter(
+        (item) => classificarEstoque(item) === "NORMAL"
+      ).length
+    },
+    {
+      label: "Estoque baixo",
+      value: estoquesCatalogo.filter(
+        (item) => classificarEstoque(item) === "BAIXO"
+      ).length
+    },
+    {
+      label: "Sem estoque",
+      value: estoquesCatalogo.filter(
+        (item) => classificarEstoque(item) === "SEM ESTOQUE"
+      ).length
+    }
+  ],
+  [estoquesCatalogo]
+);
+
 
   const dadosMovimentacoes = useMemo(
-    () => criarDadosMovimentacoes(movimentacoes),
-    [movimentacoes]
-  );
+  () => criarDadosMovimentacoes(movimentacoesCatalogo),
+  [movimentacoesCatalogo]
+);
 
   // =====================================================
   // GRAFICO DE ESTOQUE
@@ -1142,40 +1165,42 @@ useEffect(() => {
       .slice(0, 6);
   }, [produtosCatalogo, estoques]);
 
-  const estoqueFiltrado = useMemo(() => {
-    const termo = buscaEstoque.toLowerCase().trim();
+  
+const estoqueFiltrado = useMemo(() => {
+  const termo = buscaEstoque.toLowerCase().trim();
 
-    return estoques
-      .filter((item) => {
-        const texto = [
-          item.codigo,
-          item.nome,
-          item.categoria
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
+  return estoquesCatalogo
+    .filter((item) => {
+      const texto = [
+        item.codigo,
+        item.nome,
+        item.categoria
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
 
-        return !termo || texto.includes(termo);
-      })
-      .filter(
-        (item) =>
-          filtroEstoque === "TODOS" ||
-          classificarEstoque(item) === filtroEstoque
-      )
-      .sort((a, b) => {
-        const prioridade = {
-          "SEM ESTOQUE": 0,
-          "BAIXO": 1,
-          "NORMAL": 2
-        };
+      return !termo || texto.includes(termo);
+    })
+    .filter(
+      (item) =>
+        filtroEstoque === "TODOS" ||
+        classificarEstoque(item) === filtroEstoque
+    )
+    .sort((a, b) => {
+      const prioridade = {
+        "SEM ESTOQUE": 0,
+        "BAIXO": 1,
+        "NORMAL": 2
+      };
 
-        return (
-          prioridade[classificarEstoque(a)] -
-          prioridade[classificarEstoque(b)]
-        );
-      });
-  }, [estoques, buscaEstoque, filtroEstoque]);
+      return (
+        prioridade[classificarEstoque(a)] -
+        prioridade[classificarEstoque(b)]
+      );
+    });
+}, [estoquesCatalogo, buscaEstoque, filtroEstoque]);
+
 
   const reposicoesNecessarias = useMemo(
     () => reposicoes.filter(obterNecessidade),
@@ -1195,7 +1220,7 @@ useEffect(() => {
   const movimentacoesFiltradas = useMemo(() => {
     const termo = buscaMovimentacao.toLowerCase().trim();
 
-    return movimentacoes.filter((item) => {
+    return movimentacoesCatalogo.filter((item) => {
       const tipo = normalizarTexto(item.tipo);
 
       const correspondeTipo =
@@ -1224,7 +1249,7 @@ useEffect(() => {
       return correspondeTipo && (!termo || texto.includes(termo));
     });
   }, [
-    movimentacoes,
+    movimentacoesCatalogo,
     produtos,
     buscaMovimentacao,
     filtroMovimentacao
@@ -1250,38 +1275,38 @@ useEffect(() => {
   }, [fornecedores, buscaFornecedor]);
 
   const resumoMovimentacoes = useMemo(
-    () =>
-      movimentacoes.reduce(
-        (total, item) => {
-          const tipo = normalizarTexto(item.tipo);
-          const quantidade = Number(item.quantidade || 0);
+  () =>
+    movimentacoesCatalogo.reduce(
+      (total, item) => {
+        const tipo = normalizarTexto(item.tipo);
+        const quantidade = Number(item.quantidade || 0);
 
-          if (tipo.includes("ENTRAD")) {
-            total.entradas += quantidade;
-            total.quantidadeEntradas++;
-          } else if (
-            tipo.includes("SAID") ||
-            tipo.includes("RETIR")
-          ) {
-            total.saidas += quantidade;
-            total.quantidadeSaidas++;
-          }
-
-          return total;
-        },
-        {
-          entradas: 0,
-          saidas: 0,
-          quantidadeEntradas: 0,
-          quantidadeSaidas: 0
+        if (tipo.includes("ENTRAD")) {
+          total.entradas += quantidade;
+          total.quantidadeEntradas++;
+        } else if (
+          tipo.includes("SAID") ||
+          tipo.includes("RETIR")
+        ) {
+          total.saidas += quantidade;
+          total.quantidadeSaidas++;
         }
-      ),
-    [movimentacoes]
-  );
 
-  const tituloPagina =
-    MENU.find((item) => item.id === pagina)?.label ||
-    "Visão geral";
+        return total;
+      },
+      {
+        entradas: 0,
+        saidas: 0,
+        quantidadeEntradas: 0,
+        quantidadeSaidas: 0
+      }
+    ),
+  [movimentacoesCatalogo]
+);
+
+const tituloPagina =
+  MENU.find((item) => item.id === pagina)?.label ||
+  "Visão geral";
 
   // =====================================================
   // MENU
@@ -1655,7 +1680,7 @@ useEffect(() => {
 
           <Indicador
             label="Movimentações"
-            value={numero(movimentacoes.length)}
+            value={numero(movimentacoesCatalogo.length)}
             detail="Registros consultados"
             icon={<LuArrowLeftRight />}
           />
@@ -1890,19 +1915,20 @@ useEffect(() => {
   // =====================================================
   // ESTOQUE
   // =====================================================
-
   function paginaEstoque() {
-    const normais = estoques.filter(
-      (item) => classificarEstoque(item) === "NORMAL"
-    ).length;
+  
+const normais = estoquesCatalogo.filter(
+  (item) => classificarEstoque(item) === "NORMAL"
+).length;
 
-    const baixos = estoques.filter(
-      (item) => classificarEstoque(item) === "BAIXO"
-    ).length;
+const baixos = estoquesCatalogo.filter(
+  (item) => classificarEstoque(item) === "BAIXO"
+).length;
 
-    const semEstoque = estoques.filter(
-      (item) => classificarEstoque(item) === "SEM ESTOQUE"
-    ).length;
+const semEstoque = estoquesCatalogo.filter(
+  (item) => classificarEstoque(item) === "SEM ESTOQUE"
+).length;
+
 
     return (
       <>
@@ -1967,9 +1993,9 @@ useEffect(() => {
                     className="horizontal-bar-fill"
                     style={{
                       width: `${
-                        estoques.length
-                          ? (item.value / estoques.length) * 100
-                          : 0
+                        estoquesCatalogo.length
+  ? (item.value / estoquesCatalogo.length) * 100
+  : 0
                       }%`
                     }}
                   />
@@ -2352,7 +2378,7 @@ useEffect(() => {
         <section className="metrics-grid">
           <Indicador
             label="Movimentações registradas"
-            value={numero(movimentacoes.length)}
+           value={numero(movimentacoesCatalogo.length)}
             detail="Histórico consultado"
             icon={<LuArrowLeftRight />}
           />
